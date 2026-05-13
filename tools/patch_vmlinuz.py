@@ -5,10 +5,6 @@ import os
 import struct
 import lzma
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.dirname(SCRIPT_DIR)
-DOC_DIR = os.path.join(ROOT_DIR, "doc")
-
 # Linux x86 boot header field offsets
 HDRMAGIC = b"HdrS"
 HDRMAGIC_OFFSET = 0x202
