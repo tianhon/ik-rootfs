@@ -10,10 +10,11 @@ unpack_dir="$(pwd)/rootfs-unpack"
 
 bin_files="$(pwd)/bin-boot-files"
 iso_files="$(pwd)/iso-boot-files"
+tools_dir="$(pwd)/tools"
 
-. tools/utils.sh
+. "$tools_dir/utils.sh"
 
-cd tools
+cd "$tools_dir"
 . build_tools.sh
 cd ..
 
@@ -600,14 +601,16 @@ function patch () {
     local build_time="${6:-}"
     local decode_flag="-v1"
     local public_key_file=""
+    local new_public_key_file=""
     local private_key_file=""
 
-    # Allow -v1/-v2/-v3, -u, -p to appear anywhere in the argument list
+    # Allow -v1/-v2/-v3, -u, -n, -p to appear anywhere in the argument list
     local args=("$@")
     for ((i=0; i<${#args[@]}; i++)); do
         case "${args[i]}" in
             -v1|-v2|-v3) decode_flag="${args[i]}" ;;
             -u) i=$((i+1)); public_key_file="${args[i]}" ;;
+            -n) i=$((i+1)); new_public_key_file="${args[i]}" ;;
             -p) i=$((i+1)); private_key_file="${args[i]}" ;;
         esac
     done
@@ -646,6 +649,19 @@ function patch () {
         fi
     done
 
+    if [ "$new_public_key_file" != "" ]; then
+        if [ "$public_key_file" = "" ]; then
+            log ERROR "Auto patch vmlinuz requires -u OLD_PUBLIC_KEY"
+            exit 1
+        fi
+
+        patch_kernel -i "$unpack_dir/vmlinuz" -o "$unpack_dir/vmlinuz" -u "$public_key_file" -n "$new_public_key_file"
+        if [ $? -ne 0 ]; then
+            log ERROR "Auto patch vmlinuz fail!"
+            exit 1
+        fi
+    fi
+
     clean_work
 
     log INFO "Switch to $current_pwd"
@@ -656,6 +672,126 @@ function patch () {
     elif [ "$out_type" = "bin" ]; then
         pack_bin "$firmware_id" "$version_arg" "$build_time" "$decode_flag" ${private_key_file:+-p "$private_key_file"}
     fi
+}
+
+function patch_kernel () {
+    local input_vmlinuz="$unpack_dir/vmlinuz"
+    local output_vmlinuz="$unpack_dir/vmlinuz"
+    local old_key_pem=""
+    local new_key_pem=""
+    local python_cmd=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -i|--input)
+                shift
+                if [ "$1" = "" ]; then
+                    log ERROR "Missing value for --input"
+                    return 1
+                fi
+                input_vmlinuz="$1"
+            ;;
+            -o|--output)
+                shift
+                if [ "$1" = "" ]; then
+                    log ERROR "Missing value for --output"
+                    return 1
+                fi
+                output_vmlinuz="$1"
+            ;;
+            -u|--old-key)
+                shift
+                if [ "$1" = "" ]; then
+                    log ERROR "Missing value for --old-key"
+                    return 1
+                fi
+                old_key_pem="$1"
+            ;;
+            -n|--new-key)
+                shift
+                if [ "$1" = "" ]; then
+                    log ERROR "Missing value for --new-key"
+                    return 1
+                fi
+                new_key_pem="$1"
+            ;;
+            -h|--help)
+                cat <<EOF
+Usage: $0 patch_kernel -u OLD_PUBLIC_KEY -n NEW_PUBLIC_KEY [-i INPUT_VMLINUZ] [-o OUTPUT_VMLINUZ]
+
+Patch the embedded RSA public key in a Linux vmlinuz.
+
+Defaults:
+  INPUT_VMLINUZ  : $unpack_dir/vmlinuz
+  OUTPUT_VMLINUZ : same as input (patch in place)
+EOF
+                return 0
+            ;;
+            -*)
+                log ERROR "Unknown option: $1"
+                return 1
+            ;;
+            *)
+                if [ "$new_key_pem" = "" ]; then
+                    new_key_pem="$1"
+                else
+                    log ERROR "Unknown argument: $1"
+                    return 1
+                fi
+            ;;
+        esac
+        shift
+    done
+
+    if [ "$old_key_pem" = "" ]; then
+        log ERROR "Not found old public key file. Use: $0 patch_kernel -u OLD_PUBLIC_KEY -n NEW_PUBLIC_KEY"
+        return 1
+    fi
+
+    if [ "$new_key_pem" = "" ]; then
+        log ERROR "Not found new public key file. Use: $0 patch_kernel -u OLD_PUBLIC_KEY -n NEW_PUBLIC_KEY"
+        return 1
+    fi
+
+    if [ ! -f "$input_vmlinuz" ]; then
+        log ERROR "Input vmlinuz not found: $input_vmlinuz"
+        return 1
+    fi
+
+    if [ ! -f "$old_key_pem" ]; then
+        log ERROR "Old public key file not found: $old_key_pem"
+        return 1
+    fi
+
+    if [ ! -f "$new_key_pem" ]; then
+        log ERROR "New public key file not found: $new_key_pem"
+        return 1
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        python_cmd="python3"
+    elif command -v python >/dev/null 2>&1; then
+        python_cmd="python"
+    else
+        log ERROR "python3/python not found!"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$output_vmlinuz")"
+
+    log INFO "Patch vmlinuz public key"
+    "$python_cmd" "$tools_dir/patch_vmlinuz.py" \
+        "$input_vmlinuz" \
+        "$output_vmlinuz" \
+        --old-key "$old_key_pem" \
+        --new-key "$new_key_pem"
+    if [ $? -ne 0 ]; then
+        log ERROR "Patch vmlinuz fail!"
+        return 1
+    fi
+
+    log INFO "Patch vmlinuz success!"
+    log INFO "File path: $output_vmlinuz"
 }
 
 function clean_work () {
@@ -682,7 +818,7 @@ function clean_all () {
 
 
 case "$1" in
-    unpack|pack_rootfs|pack_bin|pack_iso|patch)
+    unpack|pack_rootfs|pack_bin|pack_iso|patch|patch_kernel)
         func="$1"
         shift
         "$func" "$@"
@@ -703,6 +839,10 @@ Commands:
       unpack iso or bin file
       -u PUBLIC_KEY  Override RSA public key for v3 signature verification
 
+  patch_kernel -u OLD_PUBLIC_KEY -n NEW_PUBLIC_KEY [-i INPUT_VMLINUZ] [-o OUTPUT_VMLINUZ]
+      patch embedded RSA public key in vmlinuz
+      default input/output is $unpack_dir/vmlinuz
+
   pack_rootfs [firmware_id] [version] [build_time]
       pack rootfs
 
@@ -714,10 +854,11 @@ Commands:
       pack iso file
       -v3 -p PRIVATE_KEY  Use v3 format with specified RSA private key for signing
 
-  patch <xxx.bin|xxx.iso> <out_type:bin|iso> <patch_dir> [firmware_id] [version] [build_time] [-v1|-v2|-v3] [-u PUBLIC_KEY] [-p PRIVATE_KEY]
+  patch <xxx.bin|xxx.iso> <out_type:bin|iso> <patch_dir> [firmware_id] [version] [build_time] [-v1|-v2|-v3] [-u OLD_PUBLIC_KEY] [-n NEW_PUBLIC_KEY] [-p PRIVATE_KEY]
       patch iso or bin file
-      -u PUBLIC_KEY  Override RSA public key for v3 unpack verification
-      -p PRIVATE_KEY RSA private key for v3 re-encrypt signing
+      -u OLD_PUBLIC_KEY  Override RSA public key for v3 unpack verification and vmlinuz patch source key
+      -n NEW_PUBLIC_KEY  Automatically patch vmlinuz to the replacement RSA public key
+      -p PRIVATE_KEY     RSA private key for v3 re-encrypt signing
 
   clean
       clean work dir
@@ -743,6 +884,8 @@ Examples:
   $0 unpack xxx.iso -v2
   $0 unpack xxx.iso -v3
   $0 unpack xxx.iso -v3 -u public.pem
+  $0 patch_kernel -u old_public.pem -n new_public.pem
+  $0 patch_kernel -i rootfs-unpack/vmlinuz -o work/vmlinuz.patched -u old_public.pem -n new_public.pem
   $0 unpack xxx.bin
   $0 pack_rootfs
   $0 pack_bin Id Version 0
@@ -750,7 +893,7 @@ Examples:
   $0 pack_iso
   $0 pack_iso "" "" "" -v3 -p private.pem
   $0 patch xxx.iso iso patch_dir
-  $0 patch xxx.iso iso patch_dir "" "" "" -v3 -u public.pem -p private.pem
+  $0 patch xxx.iso iso patch_dir "" "" "" -v3 -u old_public.pem -n new_public.pem -p private.pem
   $0 patch xxx.bin bin patch_dir "" "" 202509221910
 EOF
     exit 1

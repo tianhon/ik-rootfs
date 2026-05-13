@@ -1,5 +1,7 @@
 .vscode
 tools/rootfs-utils
+tools/rootfs
+doc
 rootfs-unpack
 work
 *.bin

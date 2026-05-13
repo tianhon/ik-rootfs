@@ -7,30 +7,36 @@ ETH(USDT): 0x4568da7585f7d7d980fa30fcd6dd6e151778bbef
 
 TRX(USDT): THYrLLaMpb7zp5ZZXq72XGsgvLqnbdk821
 
-## Chat with us
-
-[![Matrix: Support](https://img.shields.io/badge/Support_&_Feedack-deeppink?style=for-the-badge&label=Matrix+Chat)](https://matrix.to/#/#router-patch:bladerunn.in)
-
 ## Usage
 
 ```
-Usage: build.sh <command> [args...]
+Usage: ./build.sh <command> [args...]
 
 Commands:
-  unpack <xxx.iso|xxx.bin>
+  unpack <xxx.iso|xxx.bin> [-v1|-v2|-v3] [-u PUBLIC_KEY]
       unpack iso or bin file
+      -u PUBLIC_KEY  Override RSA public key for v3 signature verification
+
+  patch_kernel -u OLD_PUBLIC_KEY -n NEW_PUBLIC_KEY [-i INPUT_VMLINUZ] [-o OUTPUT_VMLINUZ]
+      patch embedded RSA public key in vmlinuz
+      default input/output is rootfs-unpack/vmlinuz
 
   pack_rootfs [firmware_id] [version] [build_time]
       pack rootfs
 
-  pack_bin [firmware_id] [version] [build_time]
+  pack_bin [firmware_id] [version] [build_time] [-v1|-v2|-v3] [-p PRIVATE_KEY]
       pack bin file
+      -v3 -p PRIVATE_KEY  Use v3 format with specified RSA private key for signing
 
-  pack_iso [firmware_id] [version] [build_time]
+  pack_iso [firmware_id] [version] [build_time] [-v1|-v2|-v3] [-p PRIVATE_KEY]
       pack iso file
+      -v3 -p PRIVATE_KEY  Use v3 format with specified RSA private key for signing
 
-  patch <xxx.bin|xxx.iso> <out_type:bin|iso> <patch_dir> [firmware_id] [version] [build_time]
+  patch <xxx.bin|xxx.iso> <out_type:bin|iso> <patch_dir> [firmware_id] [version] [build_time] [-v1|-v2|-v3] [-u OLD_PUBLIC_KEY] [-n NEW_PUBLIC_KEY] [-p PRIVATE_KEY]
       patch iso or bin file
+      -u OLD_PUBLIC_KEY  Override RSA public key for v3 unpack verification and vmlinuz patch source key
+      -n NEW_PUBLIC_KEY  Automatically patch vmlinuz to the replacement RSA public key
+      -p PRIVATE_KEY     RSA private key for v3 re-encrypt signing
 
   clean
       clean work dir
@@ -52,11 +58,19 @@ Args:
       Other: Use input version
 
 Examples:
-  build.sh unpack xxx.iso
-  build.sh unpack xxx.bin
-  build.sh pack_rootfs
-  build.sh pack_bin Id Version 0
-  build.sh pack_iso
-  build.sh patch xxx.iso patch_dir
-  build.sh patch xxx.bin patch_dir 202509221910
+  ./build.sh unpack xxx.iso
+  ./build.sh unpack xxx.iso -v2
+  ./build.sh unpack xxx.iso -v3
+  ./build.sh unpack xxx.iso -v3 -u public.pem
+  ./build.sh patch_kernel -u old_public.pem -n new_public.pem
+  ./build.sh patch_kernel -i rootfs-unpack/vmlinuz -o work/vmlinuz.patched -u old_public.pem -n new_public.pem
+  ./build.sh unpack xxx.bin
+  ./build.sh pack_rootfs
+  ./build.sh pack_bin Id Version 0
+  ./build.sh pack_bin Id Version 0 -v3 -p private.pem
+  ./build.sh pack_iso
+  ./build.sh pack_iso "" "" "" -v3 -p private.pem
+  ./build.sh patch xxx.iso iso patch_dir
+  ./build.sh patch xxx.iso iso patch_dir "" "" "" -v3 -u old_public.pem -n new_public.pem -p private.pem
+  ./build.sh patch xxx.bin bin patch_dir "" "" 202509221910
 ```
